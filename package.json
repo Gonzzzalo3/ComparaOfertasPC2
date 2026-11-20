@@ -11,7 +11,8 @@
     "start": "node --env-file-if-exists=.env server/index.js",
     "test": "node --test",
     "lint": "eslint .",
-    "check": "npm run lint && npm test && npm run build"
+    "audit": "npm audit --audit-level=high",
+    "check": "npm run lint && npm test && npm run audit && npm run build"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.0",

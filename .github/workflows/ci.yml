@@ -1,33 +1,56 @@
-name: CI — calidad y seguridad
+name: CI ComparaOfertas
 
 on:
   push:
     branches: [main, test]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  verify:
-    name: Lint, pruebas, dependencias y compilación
+  quality:
+    name: quality
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Descargar código
-        uses: actions/checkout@v4
-      - name: Preparar Node.js
-        uses: actions/setup-node@v4
+      - name: Obtener el código
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Configurar Node.js 22
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
-      - name: Instalar dependencias bloqueadas
+      - name: Instalar dependencias fijadas
         run: npm ci
-      - name: Revisar estilo y posibles errores
+      - name: Análisis estático de estilo
         run: npm run lint
-      - name: Ejecutar pruebas automatizadas
+      - name: Pruebas unitarias y de integración
         run: npm test
-      - name: Buscar dependencias vulnerables
-        run: npm audit --audit-level=high
-      - name: Compilar el frontend de producción
+      - name: Compilar aplicación
         run: npm run build
+
+  dependency-audit:
+    name: dependency-audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Obtener el código
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Configurar Node.js 22
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - name: Auditar dependencias
+        run: npm audit --audit-level=high
