@@ -3,7 +3,7 @@ services:
     name: comparaofertas-pc2
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci && npm run check
     startCommand: npm start
     healthCheckPath: /api/health
     autoDeployTrigger: checksPass

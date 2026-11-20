@@ -187,10 +187,11 @@ function AuthDialog({ supabase, user, authStatus, onClose }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [emailRateLimited, setEmailRateLimited] = useState(false);
 
   async function submit(event) {
     event.preventDefault();
-    setBusy(true); setError(''); setMessage('');
+    setBusy(true); setError(''); setMessage(''); setEmailRateLimited(false);
     try {
       if (!supabase) throw new Error('La cuenta no está disponible ahora. Inténtalo de nuevo en un momento.');
       if (mode === 'signup') {
@@ -213,7 +214,17 @@ function AuthDialog({ supabase, user, authStatus, onClose }) {
         onClose();
       }
     } catch (cause) {
-      setError(cause.message === 'Invalid login credentials' ? 'El correo o la contraseña no son correctos.' : cause.message);
+      const authError = `${cause.code ?? ''} ${cause.message ?? ''}`.toLowerCase();
+      const limited = authError.includes('over_email_send_rate_limit') || authError.includes('email rate limit exceeded');
+      setEmailRateLimited(limited);
+      setError(limited
+        ? 'Supabase alcanzó el límite temporal de correos de confirmación para este proyecto. Cambiar de dirección o repetir el envío ahora no elimina el límite.'
+        : cause.message === 'Invalid login credentials' ? 'El correo o la contraseña no son correctos.'
+          : authError.includes('email_address_not_authorized') ? 'El correo no está habilitado para el servicio de correo de prueba de Supabase. Configura SMTP propio o usa una cuenta autorizada del proyecto.'
+            : authError.includes('email not confirmed') ? 'Confirma tu correo desde el enlace que te enviamos antes de iniciar sesión.'
+              : authError.includes('user already registered') ? 'Ya existe una cuenta con ese correo. Inicia sesión o recupera tu contraseña.'
+                : authError.includes('invalid email') ? 'Revisa que la dirección de correo esté escrita correctamente.'
+                  : cause.message || 'No se pudo completar la solicitud. Inténtalo de nuevo más tarde.');
     } finally { setBusy(false); }
   }
 
@@ -232,10 +243,10 @@ function AuthDialog({ supabase, user, authStatus, onClose }) {
     </> : <>
       <span className="eyebrow muted">COMPARAOFERTAS</span><h2 id="auth-title">{headings[mode]}</h2><p className="auth-hint">{mode === 'signup' ? 'Regístrate gratis para mantener tus preferencias sincronizadas.' : mode === 'reset' ? 'Te enviaremos un enlace seguro a tu correo.' : mode === 'recovery' ? 'Usa una contraseña nueva de al menos seis caracteres.' : 'Inicia sesión para acceder a tus favoritos y lista.'}</p>
       <form onSubmit={submit}>
-        {mode !== 'recovery' && <label className="auth-field"><span>Correo electrónico</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@correo.com" autoComplete="email" required/></label>}
+        {mode !== 'recovery' && <label className="auth-field"><span>Correo electrónico</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@correo.com" autoComplete="email" required/><small className="auth-field-hint">Usa una dirección que puedas abrir para confirmar tu cuenta.</small></label>}
         {mode !== 'reset' && <label className="auth-field"><span>{mode === 'recovery' ? 'Nueva contraseña' : 'Contraseña'}</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mínimo 6 caracteres" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={6} required/></label>}
         {mode === 'login' && <button type="button" className="forgot-link" onClick={() => { setMode('reset'); setError(''); setMessage(''); }}>¿Olvidaste tu contraseña?</button>}
-        {error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="success-note auth-message"><Check size={17}/>{message}</div>}
+        {error && <div className="auth-error" role="alert">{error}</div>}{emailRateLimited && <div className="auth-rate-limit"><strong>Puedes usar ComparaOfertas mientras tanto</strong><p>Sin iniciar sesión, favoritos, lista y precios objetivo quedan guardados solo en este dispositivo.</p><button type="button" className="auth-guest" onClick={onClose}>Continuar sin cuenta <ArrowRight size={14}/></button><a href="https://supabase.com/docs/guides/auth/auth-smtp" target="_blank" rel="noreferrer noopener">Guía para configurar correo SMTP propio</a></div>}{message && <div className="success-note auth-message"><Check size={17}/>{message}</div>}
         <button className="primary-button auth-submit" type="submit" disabled={busy || authStatus !== 'ready'}>{busy ? 'Un momento…' : mode === 'login' ? <><LogIn size={16}/> Iniciar sesión</> : mode === 'signup' ? 'Crear cuenta' : mode === 'reset' ? 'Enviar enlace' : 'Actualizar contraseña'}</button>
       </form>
       <div className="auth-switch">{mode === 'signup' ? <>¿Ya tienes una cuenta? <button onClick={() => { setMode('login'); setMessage(''); setError(''); }}>Inicia sesión</button></> : mode === 'login' ? <>¿Aún no tienes cuenta? <button onClick={() => { setMode('signup'); setMessage(''); setError(''); }}>Regístrate gratis</button></> : <button onClick={() => { setMode('login'); setMessage(''); setError(''); }}>Volver al inicio de sesión</button>}</div>
