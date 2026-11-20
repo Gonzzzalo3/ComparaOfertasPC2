@@ -58,3 +58,4 @@
 body{min-width:0;overflow-x:hidden}
 .app-shell{overflow-x:clip}
 @media(max-width:760px){.main-nav{display:none}}
+.auth-field-hint{display:block;margin-top:6px;color:#858b82;font-size:9px;line-height:1.5}.auth-rate-limit{margin-top:12px;padding:13px;border:1px solid #f0d5b0;border-radius:9px;background:#fff8ed;color:#715329;font-size:10px;line-height:1.55}.auth-rate-limit strong{display:block;color:#674719;font-size:11px}.auth-rate-limit p{margin:5px 0 10px}.auth-guest{display:inline-flex;align-items:center;gap:6px;border:0;border-radius:6px;padding:8px 10px;background:#315e45;color:#fff;font-size:10px;font-weight:700}.auth-guest:hover{background:#234a35}.auth-rate-limit>a{display:block;margin-top:9px;color:#496c53;text-decoration:underline;text-underline-offset:2px;font-size:9px}
