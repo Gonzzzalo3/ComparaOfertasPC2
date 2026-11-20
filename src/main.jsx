@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ArrowDownUp, ArrowRight, Bell, Check, ChevronDown, CircleHelp, ExternalLink, Heart, ListChecks, MapPin, Plus, Search, ShieldCheck, ShoppingBasket, SlidersHorizontal, Sparkles, Store, X } from 'lucide-react';
 import './styles.css';
