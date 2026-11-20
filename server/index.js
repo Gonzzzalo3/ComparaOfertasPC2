@@ -12,6 +12,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const allowedOrigin = process.env.APP_ORIGIN;
 
 app.disable('x-powered-by');
+app.set('trust proxy', 1);
 app.use(cors(allowedOrigin ? { origin: allowedOrigin } : undefined));
 app.use(express.json({ limit: '10kb' }));
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false }));
