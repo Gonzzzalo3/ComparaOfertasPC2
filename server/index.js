@@ -20,11 +20,18 @@ app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.setHeader('X-Frame-Options', 'DENY');
-  res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co; base-uri 'self'; form-action 'self'; object-src 'none'; frame-ancestors 'none'");
   next();
 });
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', dataMode: repository.mode, timeZone: 'America/Lima' }));
+app.get('/api/config', (_req, res) => {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const publishableKey = process.env.SUPABASE_PUBLISHABLE_KEY || process.env.SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !publishableKey) return res.status(503).json({ error: 'La autenticación no está configurada en el servidor.' });
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ supabaseUrl, publishableKey });
+});
 app.get('/api/offers', async (req, res, next) => {
   try {
     const offers = await repository.listOffers();

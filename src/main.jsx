@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ArrowDownUp, ArrowRight, Bell, Check, ChevronDown, CircleHelp, ExternalLink, Heart, ListChecks, MapPin, Plus, Search, ShieldCheck, ShoppingBasket, SlidersHorizontal, Sparkles, Store, X } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
+import { ArrowDownUp, ArrowRight, Bell, Check, ChevronDown, CircleHelp, ExternalLink, Heart, ListChecks, LogIn, LogOut, MapPin, Plus, Search, ShieldCheck, ShoppingBasket, SlidersHorizontal, Sparkles, Store, UserRound, X } from 'lucide-react';
 import './styles.css';
 
 const money = new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN' });
@@ -21,23 +22,102 @@ function App() {
   const [thresholds, setThresholds] = useState(() => readSaved('cof-thresholds', {}));
   const [dialog, setDialog] = useState(null);
   const [sort, setSort] = useState('unit');
+  const [supabase, setSupabase] = useState(null);
+  const [authStatus, setAuthStatus] = useState('loading');
+  const [user, setUser] = useState(null);
+  const [authOpen, setAuthOpen] = useState(false);
+  const preferencesOwnerRef = useRef(null);
+  const [preferencesVersion, setPreferencesVersion] = useState(0);
+  const [syncStatus, setSyncStatus] = useState('');
+  const [refreshToken, setRefreshToken] = useState(0);
+
+  useEffect(() => {
+    let active = true;
+    let subscription;
+    fetch('/api/config')
+      .then((response) => { if (!response.ok) throw new Error('La cuenta aún no está configurada.'); return response.json(); })
+      .then(({ supabaseUrl, publishableKey }) => {
+        if (!active) return;
+        const client = createClient(supabaseUrl, publishableKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+        setSupabase(client);
+        setAuthStatus('ready');
+        client.auth.getSession().then(({ data }) => { if (active) setUser(data.session?.user ?? null); });
+        const { data } = client.auth.onAuthStateChange((event, session) => {
+          setUser(session?.user ?? null);
+          if (event === 'SIGNED_OUT') {
+            setFavorites(readSaved('cof-favorites', []));
+            setBasket(readSaved('cof-basket', []));
+            setThresholds(readSaved('cof-thresholds', {}));
+          }
+          if (event === 'PASSWORD_RECOVERY') setAuthOpen(true);
+        });
+        subscription = data.subscription;
+      })
+      .catch(() => { if (active) setAuthStatus('unavailable'); });
+    return () => { active = false; subscription?.unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    preferencesOwnerRef.current = null;
+    if (!user || !supabase) return () => { active = false; };
+    supabase.from('user_preferences').select('favorites,basket,thresholds').eq('user_id', user.id).maybeSingle()
+      .then(({ data, error: cause }) => {
+        if (!active) return;
+        if (cause) {
+          setSyncStatus('No se pudieron cargar las preferencias de tu cuenta.');
+          setFavorites([]); setBasket([]); setThresholds({});
+          return;
+        }
+        setFavorites(Array.isArray(data?.favorites) ? data.favorites : []);
+        setBasket(Array.isArray(data?.basket) ? data.basket : []);
+        setThresholds(data?.thresholds && typeof data.thresholds === 'object' ? data.thresholds : {});
+        preferencesOwnerRef.current = user.id;
+        setPreferencesVersion((version) => version + 1);
+      });
+    return () => { active = false; };
+  }, [user?.id, supabase]);
+
+  useEffect(() => {
+    if (!user || !supabase || preferencesOwnerRef.current !== user.id) return undefined;
+    const timer = setTimeout(async () => {
+      const { error: cause } = await supabase.from('user_preferences').upsert({
+        user_id: user.id, favorites, basket, thresholds, updated_at: new Date().toISOString(),
+      }, { onConflict: 'user_id' });
+      setSyncStatus(cause ? 'No se pudieron sincronizar tus preferencias.' : 'Preferencias sincronizadas');
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [user?.id, supabase, preferencesVersion, favorites, basket, thresholds]);
+
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault();
+        document.querySelector('.search-box input')?.focus();
+      }
+      if (event.key === 'Escape') { setDialog(null); setAuthOpen(false); }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams();
     if (search.trim()) params.set('q', search.trim());
     if (category !== 'Todos') params.set('category', category);
     if (chain !== 'Todas las tiendas') params.set('chain', chain);
-    setLoading(true);
+    let active = true;
     fetch(`/api/offers?${params}`, { headers: { Accept: 'application/json' } })
       .then((response) => { if (!response.ok) throw new Error('No se pudo conectar con el catálogo.'); return response.json(); })
-      .then((data) => { setOffers(data.items); setMode(data.dataMode); setError(''); })
-      .catch((cause) => setError(cause.message))
-      .finally(() => setLoading(false));
-  }, [search, category, chain]);
+      .then((data) => { if (active) { setOffers(data.items); setMode(data.dataMode); setError(''); } })
+      .catch((cause) => { if (active) setError(cause.message); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [search, category, chain, refreshToken]);
 
-  useEffect(() => { localStorage.setItem('cof-favorites', JSON.stringify(favorites)); }, [favorites]);
-  useEffect(() => { localStorage.setItem('cof-basket', JSON.stringify(basket)); }, [basket]);
-  useEffect(() => { localStorage.setItem('cof-thresholds', JSON.stringify(thresholds)); }, [thresholds]);
+  useEffect(() => { if (!user) localStorage.setItem('cof-favorites', JSON.stringify(favorites)); }, [user?.id, favorites]);
+  useEffect(() => { if (!user) localStorage.setItem('cof-basket', JSON.stringify(basket)); }, [user?.id, basket]);
+  useEffect(() => { if (!user) localStorage.setItem('cof-thresholds', JSON.stringify(thresholds)); }, [user?.id, thresholds]);
 
   const products = useMemo(() => {
     const grouped = new Map();
@@ -55,6 +135,7 @@ function App() {
   const basketOffers = basket.map((id) => offers.find((offer) => offer.id === id)).filter(Boolean);
   const stores = [...new Set(basketOffers.map((offer) => offer.chain))];
   const byStore = stores.map((name) => ({ name, total: basketOffers.filter((offer) => offer.chain === name).reduce((sum, offer) => sum + Number(offer.price), 0) })).sort((a, b) => a.total - b.total);
+  const topDiscount = Math.round(Math.max(0, ...offers.map(savings)));
 
   function toggleFavorite(key) { setFavorites((current) => current.includes(key) ? current.filter((id) => id !== key) : [...current, key]); }
   function toggleBasket(id) { setBasket((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]); }
@@ -64,7 +145,7 @@ function App() {
     <header className="topbar">
       <a className="brand" href="#inicio" aria-label="ComparaOfertas, inicio"><span className="brand-mark"><ShoppingBasket size={21}/></span><span>compara<span className="brand-accent">ofertas</span></span></a>
       <nav className="main-nav" aria-label="Navegación principal"><a className="nav-active" href="#ofertas">Explorar ofertas</a><button onClick={() => document.getElementById('mi-lista')?.scrollIntoView({ behavior: 'smooth' })}>Mi lista <span className="nav-count">{basketOffers.length}</span></button></nav>
-      <div className="top-actions"><span className="location"><MapPin size={15}/> Lima, Perú <ChevronDown size={13}/></span><button className="avatar" title="Perfil local">G</button></div>
+      <div className="top-actions"><span className="location"><MapPin size={15}/> Lima, Perú <ChevronDown size={13}/></span><button className={`account-button ${user ? 'signed-in' : ''}`} onClick={() => setAuthOpen(true)} aria-label={user ? `Cuenta de ${user.email}` : 'Iniciar sesión'} title={user?.email ?? 'Iniciar sesión'}>{user ? <><span className="account-avatar">{user.email?.slice(0, 1).toUpperCase() ?? 'U'}</span><span className="account-label">Mi cuenta</span></> : <><UserRound size={16}/><span className="account-label">{authStatus === 'loading' ? 'Cargando' : 'Ingresar'}</span></>}</button></div>
     </header>
 
     <main id="inicio">
@@ -74,28 +155,93 @@ function App() {
           <p>Encuentra el precio que te conviene y descubre cuánto puedes ahorrar en cada tienda.</p>
           <div className="hero-proof"><span><Check size={14}/> Precios por unidad comparables</span><span><Check size={14}/> Ofertas con fecha de vigencia</span></div>
         </div>
-        <div className="hero-art" aria-hidden="true"><div className="art-circle circle-back"></div><div className="art-circle circle-front"></div><div className="receipt"><span>COMPRA INTELIGENTE</span><div className="receipt-line"></div><div className="receipt-row"><i></i><b></b></div><div className="receipt-row"><i></i><b></b></div><div className="receipt-row"><i></i><b></b></div><div className="receipt-total"><span>AHORRAS</span><strong>S/ 12.40</strong></div></div><div className="floating-tag"><span>↓</span> Mejor precio</div><div className="art-spark">✳</div></div>
+        <div className="hero-art" aria-hidden="true"><div className="art-circle circle-back"></div><div className="art-circle circle-front"></div><div className="receipt"><span>COMPRA INTELIGENTE</span><div className="receipt-line"></div><div className="receipt-row"><i></i><b></b></div><div className="receipt-row"><i></i><b></b></div><div className="receipt-row"><i></i><b></b></div><div className="receipt-total"><span>MEJOR DESCUENTO</span><strong>{topDiscount}%</strong></div></div><div className="floating-tag"><span>↓</span> Mejor precio</div><div className="art-spark">✳</div></div>
       </section>
 
       <section className="search-panel" aria-label="Buscar y filtrar ofertas">
-        <label className="search-box"><Search size={19}/><input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="¿Qué estás buscando hoy?" aria-label="Buscar productos, marcas o tiendas"/><kbd>⌘ K</kbd></label>
-        <label className="select-box"><SlidersHorizontal size={17}/><select value={category} onChange={(e) => setCategory(e.target.value)} aria-label="Filtrar por categoría">{CATEGORIES.map((item) => <option key={item} value={item}>{item === 'Todos' ? 'Todas las categorías' : item}</option>)}</select></label>
-        <label className="select-box store-select"><Store size={17}/><select value={chain} onChange={(e) => setChain(e.target.value)} aria-label="Filtrar por tienda"><option>Todas las tiendas</option>{chains.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label className="search-box"><Search size={19}/><input value={search} onChange={(e) => { setLoading(true); setSearch(e.target.value); }} placeholder="¿Qué estás buscando hoy?" aria-label="Buscar productos, marcas o tiendas"/><kbd>Ctrl K</kbd></label>
+        <label className="select-box"><SlidersHorizontal size={17}/><select value={category} onChange={(e) => { setLoading(true); setCategory(e.target.value); }} aria-label="Filtrar por categoría">{CATEGORIES.map((item) => <option key={item} value={item}>{item === 'Todos' ? 'Todas las categorías' : item}</option>)}</select></label>
+        <label className="select-box store-select"><Store size={17}/><select value={chain} onChange={(e) => { setLoading(true); setChain(e.target.value); }} aria-label="Filtrar por tienda"><option>Todas las tiendas</option>{chains.map((item) => <option key={item}>{item}</option>)}</select></label>
       </section>
 
       <section className="catalog-section" id="ofertas">
         <div className="section-heading"><div><span className="eyebrow muted">PRECIOS A TU ALCANCE</span><h2>Ofertas para comparar <span className="result-count">{products.length}</span></h2></div><div className="catalog-actions"><button className={`text-button ${favoritesOnly ? 'active-filter' : ''}`} onClick={() => setFavoritesOnly(!favoritesOnly)}><Heart size={16} fill={favoritesOnly ? 'currentColor' : 'none'}/> Favoritos</button><label className="sort-select"><ArrowDownUp size={15}/><select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Ordenar ofertas"><option value="unit">Mejor precio por unidad</option><option value="savings">Mayor descuento</option></select></label></div></div>
         <div className="trust-note"><ShieldCheck size={16}/><span>{mode === 'demo' ? 'Catálogo de demostración para la actividad. Precios y tiendas ficticios: valida siempre la oferta y su vigencia en el canal oficial.' : 'Consulta las condiciones y fechas en la fuente oficial antes de comprar.'}</span><button onClick={() => setDialog({ type: 'about' })} aria-label="Información sobre los datos"><CircleHelp size={15}/></button></div>
-        {error && <div className="error-state"><CircleHelp/><p>{error}</p><button className="outline-button" onClick={() => setSearch((value) => `${value} `)}>Reintentar</button></div>}
-        {loading ? <div className="loading-state"><span className="loader"></span>Consultando ofertas…</div> : !products.length && !error ? <div className="empty-state"><Search size={28}/><h3>No encontramos resultados</h3><p>Prueba con otro producto o quita algún filtro.</p><button className="text-button" onClick={() => { setSearch(''); setCategory('Todos'); setChain('Todas las tiendas'); setFavoritesOnly(false); }}>Limpiar filtros</button></div> : <div className="offer-grid">{products.map((group) => <OfferCard key={group.key} group={group} favorite={favorites.includes(group.key)} onFavorite={() => toggleFavorite(group.key)} onCompare={() => setDialog({ type: 'compare', group })} onAlert={() => setDialog({ type: 'alert', group })} onAdd={() => toggleBasket(group.best.id)} selected={basket.includes(group.best.id)} threshold={thresholds[group.key]}/>)}</div>}
+        {error && <div className="error-state"><CircleHelp/><p>{error}</p><button className="outline-button" onClick={() => { setError(''); setLoading(true); setRefreshToken((value) => value + 1); }}>Reintentar</button></div>}
+        {loading ? <div className="loading-state"><span className="loader"></span>Consultando ofertas…</div> : !products.length && !error ? <div className="empty-state"><Search size={28}/><h3>No encontramos resultados</h3><p>Prueba con otro producto o quita algún filtro.</p><button className="text-button" onClick={() => { setLoading(true); setSearch(''); setCategory('Todos'); setChain('Todas las tiendas'); setFavoritesOnly(false); }}>Limpiar filtros</button></div> : <div className="offer-grid">{products.map((group) => <OfferCard key={group.key} group={group} favorite={favorites.includes(group.key)} onFavorite={() => toggleFavorite(group.key)} onCompare={() => setDialog({ type: 'compare', group })} onAlert={() => setDialog({ type: 'alert', group })} onAdd={() => toggleBasket(group.best.id)} selected={basket.includes(group.best.id)} threshold={thresholds[group.key]}/>)}</div>}
       </section>
 
       <section className="shopping-list" id="mi-lista"><div className="list-heading"><div className="list-icon"><ListChecks size={20}/></div><div><span className="eyebrow muted">PLANIFICA ANTES DE SALIR</span><h2>Tu lista de compra <span className="result-count">{basketOffers.length}</span></h2></div><button className="text-button clear-list" onClick={() => setBasket([])} disabled={!basket.length}>Vaciar lista</button></div>
         {!basketOffers.length ? <p className="list-empty">Agrega productos desde las ofertas y compara el total entre tiendas.</p> : <><div className="basket-items">{basketOffers.map((offer) => <div className="basket-row" key={offer.id}><div><strong>{offer.product_name}</strong><span>{offer.presentation} · {offer.chain}</span></div><b>{money.format(offer.price)}</b><button onClick={() => toggleBasket(offer.id)} aria-label={`Quitar ${offer.product_name}`}><X size={15}/></button></div>)}</div><div className="store-totals"><span>Totales por tienda (con los productos agregados)</span>{byStore.map((store, i) => <div className={i === 0 ? 'best-total' : ''} key={store.name}><span>{store.name}{i === 0 && <small>MEJOR TOTAL</small>}</span><strong>{money.format(store.total)}</strong></div>)}</div></>}</section>
-      <footer><a className="brand footer-brand" href="#inicio"><span className="brand-mark"><ShoppingBasket size={18}/></span><span>compara<span className="brand-accent">ofertas</span></span></a><span>Precios claros. Decisiones inteligentes.</span><button onClick={() => setDialog({ type: 'report' })}>¿Viste un precio incorrecto? Cuéntanos <ArrowRight size={14}/></button></footer>
+      <footer><a className="brand footer-brand" href="#inicio"><span className="brand-mark"><ShoppingBasket size={18}/></span><span>compara<span className="brand-accent">ofertas</span></span></a><span>Precios claros. Decisiones inteligentes.</span><span className="sync-status" aria-live="polite">{user && syncStatus}</span><button onClick={() => setDialog({ type: 'report' })}>¿Viste un precio incorrecto? Cuéntanos <ArrowRight size={14}/></button></footer>
     </main>
     {dialog && <AppDialog dialog={dialog} offers={offers} basket={basket} thresholds={thresholds} onClose={() => setDialog(null)} onBasket={toggleBasket} onThreshold={saveThreshold}/>}
+    {authOpen && <AuthDialog supabase={supabase} user={user} authStatus={authStatus} onClose={() => setAuthOpen(false)}/>}
   </div>;
+}
+
+function AuthDialog({ supabase, user, authStatus, onClose }) {
+  const [mode, setMode] = useState(window.location.hash.includes('type=recovery') ? 'recovery' : 'login');
+  const [email, setEmail] = useState(user?.email ?? '');
+  const [password, setPassword] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  async function submit(event) {
+    event.preventDefault();
+    setBusy(true); setError(''); setMessage('');
+    try {
+      if (!supabase) throw new Error('La cuenta no está disponible ahora. Inténtalo de nuevo en un momento.');
+      if (mode === 'signup') {
+        const { data, error: cause } = await supabase.auth.signUp({ email: email.trim(), password, options: { emailRedirectTo: window.location.origin } });
+        if (cause) throw cause;
+        setMessage(data.session ? 'Tu cuenta quedó creada y ya puedes guardar tus preferencias.' : 'Te enviamos un correo para confirmar tu cuenta. Revisa también la carpeta de spam.');
+        if (data.session) onClose();
+      } else if (mode === 'reset') {
+        const { error: cause } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo: window.location.origin });
+        if (cause) throw cause;
+        setMessage('Si el correo corresponde a una cuenta, recibirás un enlace para restablecer la contraseña.');
+      } else if (mode === 'recovery') {
+        const { error: cause } = await supabase.auth.updateUser({ password });
+        if (cause) throw cause;
+        setMessage('Contraseña actualizada correctamente.');
+        setMode('login'); setPassword(''); window.history.replaceState(null, '', window.location.pathname);
+      } else {
+        const { error: cause } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+        if (cause) throw cause;
+        onClose();
+      }
+    } catch (cause) {
+      setError(cause.message === 'Invalid login credentials' ? 'El correo o la contraseña no son correctos.' : cause.message);
+    } finally { setBusy(false); }
+  }
+
+  async function signOut() {
+    setBusy(true); setError('');
+    const { error: cause } = await supabase.auth.signOut();
+    setBusy(false);
+    if (cause) setError(cause.message); else onClose();
+  }
+
+  const headings = { login: 'Qué bueno verte', signup: 'Crea tu cuenta', reset: 'Recupera tu acceso', recovery: 'Elige una nueva contraseña' };
+  return <div className="modal-backdrop auth-backdrop" onMouseDown={(event) => event.target === event.currentTarget && onClose()}><section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+    <div className="auth-aside"><a className="brand auth-brand" href="#inicio" onClick={onClose}><span className="brand-mark"><ShoppingBasket size={20}/></span><span>compara<span className="brand-accent">ofertas</span></span></a><div><span className="eyebrow">TU COMPRA, MÁS SIMPLE</span><h2>Todo lo que te conviene,<br/><em>en un solo lugar.</em></h2><p>Guarda tus favoritos y vuelve a tu lista desde cualquier dispositivo.</p></div><span className="auth-aside-foot"><ShieldCheck size={15}/> Tus preferencias son privadas</span></div>
+    <div className="auth-content"><button className="icon-close auth-close" onClick={onClose} aria-label="Cerrar"><X/></button>{user ? <>
+      <span className="eyebrow muted">TU PERFIL</span><h2 id="auth-title">Mi cuenta</h2><div className="profile-card"><span className="profile-avatar">{user.email?.slice(0, 1).toUpperCase() ?? 'U'}</span><div><strong>{user.email}</strong><small>{user.email_confirmed_at ? 'Correo verificado' : 'Cuenta activa'}</small></div></div><p className="auth-hint">Tu lista, favoritos y precios objetivo se sincronizan en tu cuenta.</p><button className="primary-button auth-submit" onClick={signOut} disabled={busy}><LogOut size={16}/>{busy ? 'Cerrando sesión…' : 'Cerrar sesión'}</button>
+    </> : <>
+      <span className="eyebrow muted">COMPARAOFERTAS</span><h2 id="auth-title">{headings[mode]}</h2><p className="auth-hint">{mode === 'signup' ? 'Regístrate gratis para mantener tus preferencias sincronizadas.' : mode === 'reset' ? 'Te enviaremos un enlace seguro a tu correo.' : mode === 'recovery' ? 'Usa una contraseña nueva de al menos seis caracteres.' : 'Inicia sesión para acceder a tus favoritos y lista.'}</p>
+      <form onSubmit={submit}>
+        {mode !== 'recovery' && <label className="auth-field"><span>Correo electrónico</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="tu@correo.com" autoComplete="email" required/></label>}
+        {mode !== 'reset' && <label className="auth-field"><span>{mode === 'recovery' ? 'Nueva contraseña' : 'Contraseña'}</span><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Mínimo 6 caracteres" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={6} required/></label>}
+        {mode === 'login' && <button type="button" className="forgot-link" onClick={() => { setMode('reset'); setError(''); setMessage(''); }}>¿Olvidaste tu contraseña?</button>}
+        {error && <div className="auth-error" role="alert">{error}</div>}{message && <div className="success-note auth-message"><Check size={17}/>{message}</div>}
+        <button className="primary-button auth-submit" type="submit" disabled={busy || authStatus !== 'ready'}>{busy ? 'Un momento…' : mode === 'login' ? <><LogIn size={16}/> Iniciar sesión</> : mode === 'signup' ? 'Crear cuenta' : mode === 'reset' ? 'Enviar enlace' : 'Actualizar contraseña'}</button>
+      </form>
+      <div className="auth-switch">{mode === 'signup' ? <>¿Ya tienes una cuenta? <button onClick={() => { setMode('login'); setMessage(''); setError(''); }}>Inicia sesión</button></> : mode === 'login' ? <>¿Aún no tienes cuenta? <button onClick={() => { setMode('signup'); setMessage(''); setError(''); }}>Regístrate gratis</button></> : <button onClick={() => { setMode('login'); setMessage(''); setError(''); }}>Volver al inicio de sesión</button>}</div>
+      {authStatus === 'unavailable' && <p className="auth-config-note">El catálogo sigue disponible, pero el servidor aún no habilitó el acceso a cuentas.</p>}
+    </>}</div>
+  </section></div>;
 }
 
 function savings(offer) { return offer.original_price > offer.price ? ((offer.original_price - offer.price) / offer.original_price) * 100 : 0; }

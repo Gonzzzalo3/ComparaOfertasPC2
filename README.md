@@ -23,11 +23,12 @@ Abre `http://localhost:5173`. La API de desarrollo escucha en el puerto 10000. P
 
 ## Conectar Supabase
 
-1. Ejecuta `supabase/migrations/202611190001_initial.sql` en el SQL Editor del proyecto.
-2. Define `SUPABASE_URL` y `SUPABASE_ANON_KEY` en `.env` local o como variables privadas del servicio en Render. Copia el endpoint y la clave pública (`anon` o publishable) desde la configuración del proyecto. La clave `service_role` no se usa.
-3. Reinicia el servidor. `/api/health` debe indicar `dataMode: "supabase"`.
+1. Ejecuta las migraciones de `supabase/migrations` en orden. Estas configuran el catálogo, preferencias por cuenta y políticas RLS.
+2. Define `SUPABASE_URL` y `SUPABASE_ANON_KEY` en `.env` local o como variables privadas del servicio en Render. También se admite `SUPABASE_PUBLISHABLE_KEY`. Copia la URL y la clave pública del proyecto. La clave `service_role` no se usa ni se expone.
+3. En Supabase abre **Authentication → URL Configuration** y agrega `https://comparaofertas-pc2.onrender.com` a **Redirect URLs** (y `http://localhost:5173` para desarrollo). Así los enlaces de confirmación y recuperación vuelven a la app.
+4. Reinicia el servidor. `/api/health` debe indicar `dataMode: "supabase"` y `/api/config` debe responder con la URL del proyecto y una clave pública.
 
-Las ofertas se pueden actualizar desde el SQL Editor con permisos de administrador. El rol `anon` solo tiene permiso de lectura condicionado por la política RLS; la app no expone endpoints para escribir en la base.
+Las ofertas se pueden actualizar desde el SQL Editor con permisos de administrador. El rol `anon` solo tiene permiso de lectura condicionado por la política RLS; la app no expone endpoints para escribir en el catálogo. Los usuarios autenticados pueden guardar sus preferencias personales en `user_preferences`, donde RLS limita cada fila a su propietario.
 
 ## Flujo de ramas
 
@@ -38,6 +39,7 @@ Las ofertas se pueden actualizar desde el SQL Editor con permisos de administrad
 ## Endpoints
 
 - `GET /api/health`: estado, modo de datos y huso horario.
+- `GET /api/config`: expone únicamente URL de Supabase y clave pública para inicializar Auth en el navegador.
 - `GET /api/offers?q=&category=&chain=`: ofertas vigentes, ordenadas por precio normalizado.
 
-En modo demo, precios, nombres de tiendas y enlaces son datos ficticios. Los favoritos, umbrales, lista y reportes de muestra se almacenan solo en `localStorage` del dispositivo.
+En modo demo, precios, nombres de tiendas y enlaces son datos ficticios. Sin iniciar sesión, favoritos, umbrales y lista se conservan en `localStorage`; al iniciar sesión se sincronizan con la cuenta. Los reportes de precios de muestra permanecen en el navegador.
