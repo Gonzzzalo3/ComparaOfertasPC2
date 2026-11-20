@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.NODE_ENV = 'test';
+delete process.env.SUPABASE_URL;
+delete process.env.SUPABASE_ANON_KEY;
 const { default: app } = await import('./index.js');
 
 test('API de salud informa estado y modo de datos sin revelar credenciales', async (context) => {
