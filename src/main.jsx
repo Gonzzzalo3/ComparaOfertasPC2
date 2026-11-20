@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ArrowDownUp, ArrowRight, Bell, Check, ChevronDown, CircleHelp, ExternalLink, Heart, ListChecks, MapPin, Plus, Search, ShieldCheck, ShoppingBasket, SlidersHorizontal, Sparkles, Store, X } from 'lucide-react';
 import './styles.css';
@@ -100,6 +100,13 @@ function App() {
 
 function savings(offer) { return offer.original_price > offer.price ? ((offer.original_price - offer.price) / offer.original_price) * 100 : 0; }
 function unitLabel(offer) { return offer.unit === 'g' ? 'kg' : offer.unit === 'ml' ? 'L' : 'unidad'; }
+function unitPrice(offer) {
+  const quantity = Number(offer.unit_quantity);
+  const price = Number(offer.price);
+  if (!Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(price) || price <= 0) return Number.POSITIVE_INFINITY;
+  const divisor = offer.unit === 'g' || offer.unit === 'ml' ? quantity / 1000 : quantity;
+  return price / divisor;
+}
 function unitCost(offer) { return unitPrice(offer); }
 
 function OfferCard({ group, favorite, onFavorite, onCompare, onAlert, onAdd, selected, threshold }) {
