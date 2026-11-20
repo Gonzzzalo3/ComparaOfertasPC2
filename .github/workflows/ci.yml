@@ -1,0 +1,33 @@
+name: CI — calidad y seguridad
+
+on:
+  push:
+    branches: [main, test]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Lint, pruebas, dependencias y compilación
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v4
+      - name: Preparar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Instalar dependencias bloqueadas
+        run: npm ci
+      - name: Revisar estilo y posibles errores
+        run: npm run lint
+      - name: Ejecutar pruebas automatizadas
+        run: npm test
+      - name: Buscar dependencias vulnerables
+        run: npm audit --audit-level=high
+      - name: Compilar el frontend de producción
+        run: npm run build
